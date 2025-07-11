@@ -43,18 +43,31 @@ export class VideoRecorder {
      * @param {Function} onVideoData - Callback function to receive video frame data.
      * @throws {ApplicationError} Throws an error if the video recording fails to start.
      */
-    async start(previewElement, facingMode, onVideoData, ) {
+    async start(previewElement, { facingMode, deviceId }, onVideoData) {
         try {
             this.previewElement = previewElement;
             this.onVideoData = onVideoData;
 
+            const videoConstraints = {
+                width: { ideal: this.options.width },
+                height: { ideal: this.options.height }
+            };
+
+            if (deviceId) {
+                videoConstraints.deviceId = { exact: deviceId };
+            } else {
+                videoConstraints.facingMode = facingMode;
+            }
+
             // Request camera access
+            if (!window.isSecureContext) {
+                throw new ApplicationError(
+                    'Camera access requires a secure context (HTTPS).',
+                    ErrorCodes.VIDEO_NOT_SUPPORTED
+                );
+            }
             this.stream = await navigator.mediaDevices.getUserMedia({ 
-                video: {
-                    facingMode: facingMode,
-                    width: { ideal: this.options.width },
-                    height: { ideal: this.options.height }
-                }
+                video: videoConstraints
             });
 
             const videoTrack = this.stream.getVideoTracks()[0];
@@ -191,6 +204,36 @@ export class VideoRecorder {
     }
 
     /**
+     * Gets a list of available video input devices (cameras).
+     * @returns {Promise<Array<{id: string, label: string}>>} A promise that resolves to an array of video input devices.
+     * @static
+     */
+    static async getVideoInputs() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+            throw new ApplicationError(
+                'Device enumeration is not supported in this browser',
+                ErrorCodes.VIDEO_NOT_SUPPORTED
+            );
+        }
+
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoInputs = devices.filter(device => device.kind === 'videoinput');
+            return videoInputs.map(device => ({
+                id: device.deviceId,
+                label: device.label || `Camera ${videoInputs.indexOf(device) + 1}`
+            }));
+        } catch (error) {
+            Logger.error('Failed to get video inputs:', error);
+            throw new ApplicationError(
+                'Failed to get video inputs',
+                ErrorCodes.VIDEO_START_FAILED,
+                { originalError: error }
+            );
+        }
+    }
+
+    /**
      * Validates a captured frame.
      * @param {string} base64Data - Base64 encoded frame data.
      * @returns {boolean} True if the frame is valid, false otherwise.
@@ -231,4 +274,4 @@ export class VideoRecorder {
         
         return base64Data;
     }
-} 
+}
